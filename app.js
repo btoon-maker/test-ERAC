@@ -1,13 +1,19 @@
-// Wrap everything so it runs AFTER the page + templates load
 document.addEventListener("DOMContentLoaded", () => {
+
+  // NEW: namespace so old test text doesn't appear in boxes
+  const STORAGE_PREFIX = "ERAF_V2__";
 
   const SAVE_KEYS = [
     "added_setting",
     "added_call",
+
     "choice_start",          // "noaa" | "field"
+    "choice_confirmed",      // "yes" after Continue
+
     "added_noaa",
     "added_field",
 
+    // writing
     "noaa_prediction",
     "noaa_mission_challenge",
     "field_observations",
@@ -15,9 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
     "field_mission_challenge",
   ];
 
-  function getLS(key) { return localStorage.getItem(key) || ""; }
-  function setLS(key, val) { localStorage.setItem(key, val); }
-  function delLS(key) { localStorage.removeItem(key); }
+  function k(key) { return STORAGE_PREFIX + key; }
+  function getLS(key) { return localStorage.getItem(k(key)) || ""; }
+  function setLS(key, val) { localStorage.setItem(k(key), val); }
+  function delLS(key) { localStorage.removeItem(k(key)); }
 
   function setTopStatus(msg) {
     const el = document.getElementById("saveStatus");
@@ -35,9 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function wireAutosaveWithin(root) {
     root.querySelectorAll("textarea[data-save]").forEach((ta) => {
-      const key = ta.dataset.save;
-      ta.value = getLS(key);
-      ta.addEventListener("input", () => setLS(key, ta.value));
+      const keyName = ta.dataset.save;
+      ta.value = getLS(keyName);
+      ta.addEventListener("input", () => setLS(keyName, ta.value));
     });
   }
 
@@ -86,56 +93,66 @@ document.addEventListener("DOMContentLoaded", () => {
     if (b2) b2.disabled = true;
   }
 
+  function showContinueButton() {
+    const btn = document.getElementById("continueAfterChoiceBtn");
+    if (btn) btn.style.display = "inline-block";
+  }
+
   function rebuildFromStorage() {
     const story = document.getElementById("story");
     if (!story) return;
 
     story.innerHTML = "";
 
-    // Always show Setting first
+    // Always start with Setting visible
     addTemplate("tpl-setting");
     setLS("added_setting", "yes");
 
-    // If call happened, show it
+    // If they already began mission, show The Call
     if (getLS("added_call") === "yes") {
       addTemplate("tpl-call");
     }
 
-    // If choice happened, show chosen branch only
+    // If they already selected a choice, show feedback + Continue
     const choice = getLS("choice_start");
-    if (choice === "noaa") {
-      if (getLS("added_call") !== "yes") { addTemplate("tpl-call"); setLS("added_call","yes"); }
-      renderChoiceFeedback("noaa");
+    if (choice === "noaa" || choice === "field") {
+      // ensure call exists
+      if (getLS("added_call") !== "yes") {
+        addTemplate("tpl-call");
+        setLS("added_call", "yes");
+      }
+
+      renderChoiceFeedback(choice);
       disableChoiceButtons();
-      if (getLS("added_noaa") === "yes") addTemplate("tpl-noaa");
-    }
-    if (choice === "field") {
-      if (getLS("added_call") !== "yes") { addTemplate("tpl-call"); setLS("added_call","yes"); }
-      renderChoiceFeedback("field");
-      disableChoiceButtons();
-      if (getLS("added_field") === "yes") addTemplate("tpl-field");
+      showContinueButton();
+
+      // Only show the branch AFTER they confirmed Continue
+      if (getLS("choice_confirmed") === "yes") {
+        if (choice === "noaa" && getLS("added_noaa") === "yes") addTemplate("tpl-noaa");
+        if (choice === "field" && getLS("added_field") === "yes") addTemplate("tpl-field");
+      }
     }
 
-    wireStoryButtons();
     wireAutosaveWithin(story);
+    wireStoryButtons();
   }
 
-  // Resume code (compressed state)
+  // Resume code
   function collectState() {
     const state = {};
-    SAVE_KEYS.forEach(k => state[k] = getLS(k));
+    SAVE_KEYS.forEach(keyName => state[keyName] = getLS(keyName));
     return state;
   }
 
   function encodeResumeCode(stateObj) {
     const json = JSON.stringify(stateObj);
     const compressed = LZString.compressToEncodedURIComponent(json);
-    return `R1.${compressed}`;
+    return `R2.${compressed}`; // version bump
   }
 
   function decodeResumeCode(code) {
     const trimmed = (code || "").trim();
-    if (!trimmed.startsWith("R1.")) throw new Error("That doesn't look like a valid Resume Code.");
+    if (!trimmed.startsWith("R2.")) throw new Error("That doesn't look like a valid Resume Code.");
     const compressed = trimmed.slice(3);
     const json = LZString.decompressFromEncodedURIComponent(compressed);
     if (!json) throw new Error("That code couldn't be read. Check for missing characters.");
@@ -143,8 +160,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function applyState(state) {
-    SAVE_KEYS.forEach(k => {
-      if (typeof state[k] === "string") setLS(k, state[k]);
+    SAVE_KEYS.forEach(keyName => {
+      if (typeof state[keyName] === "string") setLS(keyName, state[keyName]);
     });
     rebuildFromStorage();
     setTopStatus("Resumed!");
@@ -206,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Buttons inside story are created dynamically, so wire after rebuild
+  // Story button wiring
   function wireStoryButtons() {
     const beginBtn = document.getElementById("beginMissionBtn");
     if (beginBtn && !beginBtn.dataset.wired) {
@@ -224,20 +241,16 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
+    // CHOICE click: feedback only (no auto-advance)
     const noaaBtn = document.getElementById("choiceNoaaBtn");
     if (noaaBtn && !noaaBtn.dataset.wired) {
       noaaBtn.dataset.wired = "yes";
       noaaBtn.addEventListener("click", () => {
         setLS("choice_start", "noaa");
-        setLS("added_noaa", "yes");
-        setLS("added_field", "");
+        setLS("choice_confirmed", ""); // not confirmed yet
         renderChoiceFeedback("noaa");
-        disableChoiceButtons();
-
-        const noaaSection = addTemplate("tpl-noaa");
-        wireStoryButtons();
-        setTopStatus("NOAA section appeared.");
-        scrollToEl(noaaSection);
+        showContinueButton();
+        setTopStatus("Choice saved. Click Continue to proceed.");
       });
     }
 
@@ -246,20 +259,46 @@ document.addEventListener("DOMContentLoaded", () => {
       fieldBtn.dataset.wired = "yes";
       fieldBtn.addEventListener("click", () => {
         setLS("choice_start", "field");
-        setLS("added_field", "yes");
-        setLS("added_noaa", "");
+        setLS("choice_confirmed", "");
         renderChoiceFeedback("field");
+        showContinueButton();
+        setTopStatus("Choice saved. Click Continue to proceed.");
+      });
+    }
+
+    // CONTINUE click: now add the branch
+    const contBtn = document.getElementById("continueAfterChoiceBtn");
+    if (contBtn && !contBtn.dataset.wired) {
+      contBtn.dataset.wired = "yes";
+      contBtn.addEventListener("click", () => {
+        const choice = getLS("choice_start");
+        if (choice !== "noaa" && choice !== "field") {
+          setTopStatus("Please pick NOAA or Field first.");
+          return;
+        }
+
+        setLS("choice_confirmed", "yes");
         disableChoiceButtons();
 
-        const fieldSection = addTemplate("tpl-field");
-        wireStoryButtons();
-        setTopStatus("Field section appeared.");
-        scrollToEl(fieldSection);
+        // add the chosen section ONLY now
+        if (choice === "noaa") {
+          setLS("added_noaa", "yes");
+          setLS("added_field", "");
+          const section = addTemplate("tpl-noaa");
+          setTopStatus("NOAA section appeared.");
+          scrollToEl(section);
+        } else {
+          setLS("added_field", "yes");
+          setLS("added_noaa", "");
+          const section = addTemplate("tpl-field");
+          setTopStatus("Field section appeared.");
+          scrollToEl(section);
+        }
       });
     }
   }
 
-  // PDF export
+  // PDF export with boxed student responses
   function exportJournalToPDF() {
     const exportMsg = document.getElementById("exportMsg");
     try {
@@ -273,20 +312,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
       let y = margin;
 
-      function addLine(text, fontSize = 11, isBold = false) {
-        doc.setFont("helvetica", isBold ? "bold" : "normal");
-        doc.setFontSize(fontSize);
-
-        const lines = doc.splitTextToSize(String(text), maxWidth);
-        for (const line of lines) {
-          if (y > pageHeight - margin) { doc.addPage(); y = margin; }
-          doc.text(line, margin, y);
-          y += fontSize + 6;
+      function ensureSpace(heightNeeded) {
+        if (y + heightNeeded > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
         }
       }
+
+      function addLine(text, fontSize = 11, bold = false) {
+        doc.setFont("helvetica", bold ? "bold" : "normal");
+        doc.setFontSize(fontSize);
+        const lines = doc.splitTextToSize(String(text), maxWidth);
+        const lineHeight = fontSize + 6;
+        ensureSpace(lines.length * lineHeight);
+        for (const line of lines) {
+          doc.text(line, margin, y);
+          y += lineHeight;
+        }
+      }
+
       function addSpacer(px = 10) {
         y += px;
-        if (y > pageHeight - margin) { doc.addPage(); y = margin; }
+        ensureSpace(0);
+      }
+
+      function addResponseBox(label, responseText) {
+        addLine(label, 11, true);
+        addSpacer(4);
+
+        const text = responseText && responseText.trim() ? responseText.trim() : "(blank)";
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+
+        const padding = 10;
+        const lines = doc.splitTextToSize(text, maxWidth - padding * 2);
+        const lineHeight = 17;
+        const boxHeight = padding * 2 + lines.length * lineHeight;
+
+        ensureSpace(boxHeight + 6);
+
+        // box
+        doc.rect(margin, y, maxWidth, boxHeight);
+
+        // text inside
+        let ty = y + padding + 12;
+        for (const line of lines) {
+          doc.text(line, margin + padding, ty);
+          ty += lineHeight;
+        }
+
+        y += boxHeight + 10;
       }
 
       const choice = getLS("choice_start") || "(not chosen)";
@@ -296,36 +371,32 @@ document.addEventListener("DOMContentLoaded", () => {
       addLine(`Choice: ${choice}`, 11, false);
       addSpacer(14);
 
-      if (getLS("added_noaa") === "yes") {
+      // NOAA (include if chosen/confirmed or if any text exists)
+      const hasNoaa = getLS("added_noaa") === "yes" || getLS("noaa_prediction") || getLS("noaa_mission_challenge");
+      if (hasNoaa) {
         addLine("NOAA Data Path", 13, true);
         addLine("Prompt: Predict what might happen to the forest next year if rainfall stays low and temperatures stay high. Use data to support your prediction.", 11, false);
-        addLine("Student Response:", 11, true);
-        addLine(getLS("noaa_prediction") || "(blank)", 11, false);
-        addSpacer(10);
+        addResponseBox("Student Response:", getLS("noaa_prediction"));
         addLine("⚡ Mission Challenge (Optional)", 12, true);
         addLine("Prompt: Add one more prediction OR one question you want to investigate next.", 11, false);
-        addLine("Student Response:", 11, true);
-        addLine(getLS("noaa_mission_challenge") || "(blank)", 11, false);
-        addSpacer(16);
+        addResponseBox("Student Response:", getLS("noaa_mission_challenge"));
+        addSpacer(6);
       }
 
-      if (getLS("added_field") === "yes") {
+      // Field
+      const hasField = getLS("added_field") === "yes" || getLS("field_observations") || getLS("optional_challenge") || getLS("field_mission_challenge");
+      if (hasField) {
         addLine("Field Observation Path", 13, true);
         addLine("Prompt: Record two observations showing how the fire affected people or wildlife.", 11, false);
-        addLine("Student Response:", 11, true);
-        addLine(getLS("field_observations") || "(blank)", 11, false);
-        addSpacer(12);
+        addResponseBox("Student Response:", getLS("field_observations"));
 
         addLine("🌱 Mission Challenge (Optional)", 12, true);
         addLine("Prompt: Research a local fire-adapted plant. How does it help stabilize soil or promote regrowth?", 11, false);
-        addLine("Student Response:", 11, true);
-        addLine(getLS("optional_challenge") || "(blank)", 11, false);
-        addSpacer(10);
+        addResponseBox("Student Response:", getLS("optional_challenge"));
 
         addLine("⚡ Mission Challenge (Optional)", 12, true);
         addLine("Prompt: Add one more observation you think matters most, and explain why.", 11, false);
-        addLine("Student Response:", 11, true);
-        addLine(getLS("field_mission_challenge") || "(blank)", 11, false);
+        addResponseBox("Student Response:", getLS("field_mission_challenge"));
       }
 
       doc.save("Eco-Responders_Journal.pdf");
@@ -369,7 +440,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("resetBtn")?.addEventListener("click", () => {
-      const ok = confirm("Reset clears saved work on this device. Continue?");
+      const ok = confirm("Reset clears saved work on this device for this lesson version. Continue?");
       if (!ok) return;
 
       SAVE_KEYS.forEach(delLS);
@@ -394,11 +465,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Boot
   wireGlobalButtons();
 
-  // IMPORTANT: build the story immediately
+  // Build story immediately
   rebuildFromStorage();
   wireStoryButtons();
 
-  // QR resume (optional)
+  // Optional QR resume
   maybeResumeFromUrl();
 
   setTopStatus("Ready.");
