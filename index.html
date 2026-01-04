@@ -28,6 +28,7 @@
       font-size:1rem; font-weight: 900;
     }
     .btn.secondary { background:#405a53; }
+    .btn.ghost { background: transparent; border: 1px solid #2f5d50; color:#2f5d50; }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
     textarea {
@@ -67,7 +68,7 @@
     }
     details summary { cursor:pointer; font-weight: 900; color:#1f3b34; }
 
-    /* TOP-RIGHT PANEL (ALWAYS) */
+    /* TOP-RIGHT PANEL (ALWAYS present) */
     .savePanel {
       position: fixed;
       top: 12px;
@@ -122,7 +123,7 @@
     .savePanel .smallBtn.primary { background:#ffd166; color:#2b2b2b; }
     .savePanel .status { margin-top: 8px; opacity: 0.9; font-size: 0.8rem; white-space: pre-wrap; }
 
-    /* Modal */
+    /* Center modal */
     .overlay {
       position: fixed;
       inset: 0;
@@ -263,7 +264,7 @@
   <!-- Story renders here -->
   <div id="story"></div>
 
-  <!-- Templates MUST exist before app.js runs -->
+  <!-- Templates -->
   <template id="tpl-setting">
     <section id="setting">
       <h2>Setting the Story</h2>
@@ -343,6 +344,13 @@
           </div>
 
           <div id="choiceFeedback" class="card" style="margin-top: 1rem; display:none;"></div>
+
+          <!-- NEW: choice feedback first, then students must click Continue -->
+          <div class="row" style="margin-top:0.75rem;">
+            <button type="button" class="btn secondary" id="continueAfterChoiceBtn" style="display:none;">
+              Continue
+            </button>
+          </div>
 
           <hr class="divider" />
         </div>
@@ -428,7 +436,7 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-  <!-- IMPORTANT: app.js LAST, after templates exist -->
+  <!-- app.js LAST -->
   <script src="app.js"></script>
 </main>
 
